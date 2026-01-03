@@ -12,18 +12,50 @@ envshield provides an execution-only access model. AI requests commands to run w
 
 **AI never sees your actual secret values.**
 
-## Quick Start
+## Installation & Setup
+
+### Project-Local Setup (Recommended)
+
+Configure envshield for the current project only:
 
 ```bash
 npx envshield-mcp init
 ```
 
-Done. Your AI assistant can now use secrets safely.
+This creates `.claude/settings.json` in your project directory with envshield configuration.
+
+### Global Setup
+
+Configure envshield for all projects:
+
+```bash
+npx envshield-mcp init --global
+```
+
+This updates `~/.claude/settings.json` with envshield configuration.
+
+### Remove Global Configuration
+
+To remove envshield from global configuration:
+
+```bash
+npx envshield-mcp uninit
+```
+
+### Preview Changes
+
+Use `--dry-run` to see what would change without applying:
+
+```bash
+npx envshield-mcp init --dry-run
+npx envshield-mcp init --global --dry-run
+npx envshield-mcp uninit --dry-run
+```
 
 ## How It Works
 
 ```
-Before:  AI reads .env directly → secrets in context 
+Before:  AI reads .env directly → secrets in context
 After:   AI uses envshield MCP → executes with secrets → scrubbed output ✓
 ```
 
@@ -72,7 +104,7 @@ envshield scrubs secrets from command output:
 
 ## Manual Setup
 
-If you prefer manual configuration, add to `~/.claude/settings.json`:
+If you prefer manual configuration, add to your project's `.claude/settings.json` or global `~/.claude/settings.json`:
 
 ```json
 {

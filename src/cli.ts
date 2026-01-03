@@ -4,10 +4,11 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { cwd } from "process";
 import { startMCPServer } from "./mcp/mcp.js";
 import { VERSION } from "./version.js";
 
-const CLAUDE_SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
+const GLOBAL_CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
 
 interface ClaudeSettings {
   mcpServers?: Record<string, { command: string; args: string[] }>;
@@ -15,30 +16,32 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-async function loadClaudeSettings(): Promise<ClaudeSettings> {
-  if (!existsSync(CLAUDE_SETTINGS_PATH)) {
+async function loadSettings(path: string): Promise<ClaudeSettings> {
+  if (!existsSync(path)) {
     return {};
   }
-  const content = await readFile(CLAUDE_SETTINGS_PATH, "utf-8");
+  const content = await readFile(path, "utf-8");
   return JSON.parse(content);
 }
 
-async function saveClaudeSettings(settings: ClaudeSettings): Promise<void> {
-  const dir = join(homedir(), ".claude");
+async function saveSettings(path: string, settings: ClaudeSettings): Promise<void> {
+  const dir = join(path, "..");
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
-  await writeFile(CLAUDE_SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  await writeFile(path, JSON.stringify(settings, null, 2));
 }
 
-async function init(dryRun: boolean): Promise<void> {
-  console.log("envshield init" + (dryRun ? " (dry-run)" : ""));
+async function init(global: boolean, dryRun: boolean): Promise<void> {
+  const scope = global ? "global" : "project";
+  console.log(`envshield init (${scope})` + (dryRun ? " (dry-run)" : ""));
   console.log("");
 
-  const settings = await loadClaudeSettings();
+  const settingsPath = global ? GLOBAL_CLAUDE_SETTINGS : join(cwd(), ".claude", "settings.json");
+  const existingSettings = await loadSettings(settingsPath);
 
   // Prepare new settings
-  const newSettings: ClaudeSettings = { ...settings };
+  const newSettings: ClaudeSettings = { ...existingSettings };
 
   // Add MCP server
   newSettings.mcpServers = {
@@ -56,21 +59,75 @@ async function init(dryRun: boolean): Promise<void> {
   newSettings.deny = newDeny;
 
   if (dryRun) {
-    console.log("Would update ~/.claude/settings.json:");
+    console.log(`Would update ${settingsPath}:`);
     console.log("");
     console.log(JSON.stringify(newSettings, null, 2));
     console.log("");
     console.log("Run without --dry-run to apply changes.");
   } else {
-    await saveClaudeSettings(newSettings);
-    console.log("Updated ~/.claude/settings.json");
+    await saveSettings(settingsPath, newSettings);
+    console.log(`Updated ${settingsPath}`);
     console.log("");
     console.log("Added:");
     console.log("  - MCP server: envshield");
     console.log("  - Deny rules: Read(.env*), Edit(.env*)");
     console.log("");
-    console.log("envshield is now active. AI agents can use secrets without seeing them.");
+    console.log(global
+      ? "envshield is now globally active. AI agents can use secrets without seeing them."
+      : "envshield is now active for this project. AI agents can use secrets without seeing them."
+    );
+    if (!global) {
+      console.log("");
+      console.log("To enable globally, run: envshield-mcp init --global");
+    }
   }
+}
+
+async function uninit(dryRun: boolean): Promise<void> {
+  console.log("envshield uninit (removes global config)" + (dryRun ? " (dry-run)" : ""));
+  console.log("");
+
+  const settingsPath = GLOBAL_CLAUDE_SETTINGS;
+  const existingSettings = await loadSettings(settingsPath);
+
+  if (!existingSettings.mcpServers?.envshield) {
+    console.log("envshield is not configured in global settings.");
+    console.log("");
+    console.log("Nothing to undo.");
+    return;
+  }
+
+  if (dryRun) {
+    console.log("Would remove from global settings:");
+    console.log("");
+    console.log("  - MCP server: envshield");
+    console.log("  - Deny rules: Read(.env*), Edit(.env*)");
+    console.log("");
+    console.log("Run without --dry-run to apply changes.");
+    return;
+  }
+
+  // Remove envshield MCP server
+  const { envshield, ...otherMcpServers } = existingSettings.mcpServers ?? {};
+  const newSettings: ClaudeSettings = {
+    ...existingSettings,
+    mcpServers: Object.keys(otherMcpServers).length > 0 ? otherMcpServers : undefined,
+  };
+
+  // Remove deny rules (only if we added them and no other MCP needs them)
+  const denyRules = ["Read(.env*)", "Edit(.env*)"];
+  const existingDeny = existingSettings.deny ?? [];
+  const newDeny = existingDeny.filter((rule) => !denyRules.includes(rule));
+  newSettings.deny = newDeny.length > 0 ? newDeny : undefined;
+
+  await saveSettings(settingsPath, newSettings);
+  console.log(`Updated ${settingsPath}`);
+  console.log("");
+  console.log("Removed:");
+  console.log("  - MCP server: envshield");
+  console.log("  - Deny rules: Read(.env*), Edit(.env*)");
+  console.log("");
+  console.log("envshield has been removed from global configuration.");
 }
 
 async function main(): Promise<void> {
@@ -78,10 +135,18 @@ async function main(): Promise<void> {
   const command = args[0];
 
   switch (command) {
-    case "init":
+    case "init": {
+      const global = args.includes("--global");
       const dryRun = args.includes("--dry-run");
-      await init(dryRun);
+      await init(global, dryRun);
       break;
+    }
+
+    case "uninit": {
+      const dryRun = args.includes("--dry-run");
+      await uninit(dryRun);
+      break;
+    }
 
     case "--version":
     case "-v":
@@ -94,15 +159,25 @@ async function main(): Promise<void> {
       console.log("");
       console.log("Usage:");
       console.log("  envshield-mcp              Start MCP server (used by Claude/Cursor)");
-      console.log("  envshield-mcp init         Configure Claude Code to use envshield");
-      console.log("  envshield-mcp init --dry-run  Show what would be configured");
-      console.log("  envshield-mcp --version    Show version");
-      console.log("  envshield-mcp --help       Show this help");
+      console.log("");
+      console.log("Commands:");
+      console.log("  envshield-mcp init         Configure envshield for current project");
+      console.log("  envshield-mcp init --global    Configure envshield globally");
+      console.log("  envshield-mcp init --dry-run   Show what would be configured");
+      console.log("  envshield-mcp uninit       Remove global envshield configuration");
+      console.log("  envshield-mcp uninit --dry-run  Show what would be removed");
+      console.log("");
+      console.log("Options:");
+      console.log("  --global                  Apply configuration globally (default: project-local)");
+      console.log("  --dry-run                 Show changes without applying them");
+      console.log("");
+      console.log("  --version                Show version");
+      console.log("  --help                   Show this help");
       break;
 
     default:
       // Default: start MCP server
-      await startMCPServer(process.cwd());
+      await startMCPServer(cwd());
   }
 }
 
