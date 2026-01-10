@@ -7,6 +7,7 @@ import { homedir } from "os";
 import { cwd } from "process";
 import { startMCPServer } from "./mcp/mcp.js";
 import { VERSION } from "./version.js";
+import { glob } from "fast-glob";
 
 const GLOBAL_CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
 
@@ -22,6 +23,28 @@ async function loadSettings(path: string): Promise<ClaudeSettings> {
   }
   const content = await readFile(path, "utf-8");
   return JSON.parse(content);
+}
+
+/**
+ * Detects .env files in a project directory.
+ *
+ * @param projectDir - The project directory to search for .env files
+ * @returns A sorted array of .env file names (relative paths), or empty array on error
+ */
+export async function detectEnvFiles(projectDir: string): Promise<string[]> {
+  try {
+    const files = await glob(".env*", {
+      cwd: projectDir,
+      onlyFiles: true,
+      ignore: ["node_modules/**", ".git/**"],
+    });
+
+    return files.sort();
+  } catch (error) {
+    // Handle edge cases: directory doesn't exist, permission errors, etc.
+    // Return empty array to allow graceful degradation
+    return [];
+  }
 }
 
 async function saveSettings(path: string, settings: ClaudeSettings): Promise<void> {
@@ -48,7 +71,14 @@ const DEFAULT_ENVSHIELD_CONFIG = `{
   "allowedCommands": null,
 
   "_comment_blockedCommands": "Commands to block for security (e.g., ['rm -rf', 'sudo'])",
-  "blockedCommands": ["rm -rf", "sudo"]
+  "blockedCommands": ["rm -rf", "sudo"],
+
+  "_comment_rateLimit": "Rate limiting to prevent command flooding (disabled by default for local use)",
+  "rateLimit": {
+    "enabled": false,
+    "maxRequests": 30,
+    "windowMs": 60000
+  }
 }`;
 
 async function init(global: boolean, dryRun: boolean): Promise<void> {
