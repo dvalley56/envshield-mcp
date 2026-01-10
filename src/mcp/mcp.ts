@@ -5,6 +5,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEnvshieldServer } from "./server.js";
+import { Scrubber } from "../core/scrubber.js";
+import { VERSION } from "../version.js";
 
 export async function startMCPServer(projectDir: string): Promise<void> {
   const envshield = await createEnvshieldServer(projectDir);
@@ -12,7 +14,7 @@ export async function startMCPServer(projectDir: string): Promise<void> {
   const server = new Server(
     {
       name: "envshield",
-      version: "0.1.0",
+      version: VERSION,
     },
     {
       capabilities: {
@@ -41,11 +43,19 @@ export async function startMCPServer(projectDir: string): Promise<void> {
         ],
       };
     } catch (error) {
+      // Scrub error messages to prevent secret leakage
+      const config = envshield.config;
+      const scrubber = new Scrubber(config.redactMode, config.redactPatterns);
+      const secretValues = envshield.secrets.values();
+
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const scrubbed = scrubber.scrub(errorMsg, secretValues);
+
       return {
         content: [
           {
             type: "text",
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            text: `Error: ${scrubbed.text}`,
           },
         ],
         isError: true,

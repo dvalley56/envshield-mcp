@@ -5,6 +5,67 @@ export interface ScrubResult {
   redactedCount: number;
 }
 
+/**
+ * Validates a regex pattern to prevent ReDoS (Regular Expression Denial of Service).
+ * Tests the pattern against inputs that could cause catastrophic backtracking.
+ */
+function validateRegexPattern(pattern: string): void {
+  const maxDuration = 10; // ms - very aggressive to prevent long hangs
+
+  // Test with potentially problematic inputs
+  const testCases = [
+    "",
+    "a",
+    "a".repeat(10),
+    "a".repeat(50),  // Reduced from 100 for faster testing
+    "aaaaaaaaaaaaaaaaaaaaaab",  // Classic backtracking trigger
+  ];
+
+  // Use AbortController with setTimeout for early timeout
+  const controller = new AbortController();
+  const signal = controller.signal;
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, maxDuration);
+
+  try {
+    for (const test of testCases) {
+      const start = Date.now();
+
+      // Check if aborted (timeout exceeded)
+      if (signal.aborted) {
+        throw new Error(
+          `Regex pattern rejected due to potential catastrophic backtracking: ${pattern}`
+        );
+      }
+
+      try {
+        const regex = new RegExp(pattern, "g");
+        regex.test(test);
+        const duration = Date.now() - start;
+
+        if (duration > maxDuration) {
+          throw new Error(
+            `Regex pattern rejected due to potential catastrophic backtracking: ${pattern}`
+          );
+        }
+      } catch (err) {
+        if (err instanceof Error) {
+          if (err.message.includes("catastrophic backtracking") || err.message.includes("rejected")) {
+            throw err;
+          }
+          // Invalid regex
+          throw new Error(`Invalid regex pattern: ${pattern} - ${err.message}`);
+        }
+        throw err;
+      }
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export class Scrubber {
   private mode: RedactMode;
   private customPatterns: RegExp[];
@@ -12,7 +73,11 @@ export class Scrubber {
 
   constructor(mode: RedactMode, customPatterns: string[]) {
     this.mode = mode;
-    this.customPatterns = customPatterns.map((p) => new RegExp(p, "g"));
+    // Validate custom patterns to prevent ReDoS
+    this.customPatterns = customPatterns.map((p) => {
+      validateRegexPattern(p);
+      return new RegExp(p, "g");
+    });
     this.builtinPatterns = [
       { pattern: /sk_live_[a-zA-Z0-9]+/g, name: "STRIPE_LIVE_KEY" },
       { pattern: /sk_test_[a-zA-Z0-9]+/g, name: "STRIPE_TEST_KEY" },

@@ -1,6 +1,6 @@
 {
     "name": "envshield-mcp",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "MCP server that lets AI agents use secrets without seeing them",
     "type": "module",
     "main": "dist/index.js",

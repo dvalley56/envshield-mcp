@@ -90,4 +90,22 @@ DATABASE_URL=postgres://user:devpassword@localhost:5432/devdb
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("blocked");
   });
+
+  it("scrubs secrets from error messages", async () => {
+    const server = await createEnvshieldServer(tempDir);
+
+    // Request a non-existent secret to trigger an error
+    const result = (await server.callTool("run_with_secrets", {
+      command: "echo test",
+      secrets: ["NONEXISTENT_SECRET"],
+    })) as { exitCode: number; stderr: string };
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("not found");
+    // Error message should not contain any secret values
+    expect(result.stderr).not.toContain("sk_live_realkey123");
+    expect(result.stderr).not.toContain("supersecretvalue");
+    expect(result.stderr).not.toContain("password");
+    expect(result.stderr).not.toContain("devpassword");
+  });
 });

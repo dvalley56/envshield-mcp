@@ -32,6 +32,25 @@ async function saveSettings(path: string, settings: ClaudeSettings): Promise<voi
   await writeFile(path, JSON.stringify(settings, null, 2));
 }
 
+// Default .envshield.json template
+// Note: This is valid JSON without comments (users can add documentation themselves)
+const DEFAULT_ENVSHIELD_CONFIG = `{
+  "_comment_envFiles": "Environment files to load secrets from (earlier files take precedence)",
+  "envFiles": [".env", ".env.local"],
+
+  "_comment_redactMode": "How to redact secrets: 'placeholder', 'asterisk', or 'partial'",
+  "redactMode": "placeholder",
+
+  "_comment_redactPatterns": "Custom regex patterns (built-in: Stripe, GitHub, AWS, OpenAI, JWT)",
+  "redactPatterns": [],
+
+  "_comment_allowedCommands": "Allow ONLY these commands (null = allow all except blocked)",
+  "allowedCommands": null,
+
+  "_comment_blockedCommands": "Commands to block for security (e.g., ['rm -rf', 'sudo'])",
+  "blockedCommands": ["rm -rf", "sudo"]
+}`;
+
 async function init(global: boolean, dryRun: boolean): Promise<void> {
   const scope = global ? "global" : "project";
   console.log(`envshield init (${scope})` + (dryRun ? " (dry-run)" : ""));
@@ -64,6 +83,15 @@ async function init(global: boolean, dryRun: boolean): Promise<void> {
     console.log(JSON.stringify(newSettings, null, 2));
     console.log("");
     console.log("Run without --dry-run to apply changes.");
+
+    // Show .envshield.json would be created
+    if (!global) {
+      const configPath = join(cwd(), ".envshield.json");
+      if (!existsSync(configPath)) {
+        console.log("");
+        console.log(`Would create ${configPath} with default configuration.`);
+      }
+    }
   } else {
     await saveSettings(settingsPath, newSettings);
     console.log(`Updated ${settingsPath}`);
@@ -71,6 +99,16 @@ async function init(global: boolean, dryRun: boolean): Promise<void> {
     console.log("Added:");
     console.log("  - MCP server: envshield");
     console.log("  - Deny rules: Read(.env*), Edit(.env*)");
+
+    // Create .envshield.json for project-local init only (skip if exists)
+    if (!global) {
+      const configPath = join(cwd(), ".envshield.json");
+      if (!existsSync(configPath)) {
+        await writeFile(configPath, DEFAULT_ENVSHIELD_CONFIG);
+        console.log("  - Config file: .envshield.json");
+      }
+    }
+
     console.log("");
     console.log(global
       ? "envshield is now globally active. AI agents can use secrets without seeing them."
@@ -78,6 +116,7 @@ async function init(global: boolean, dryRun: boolean): Promise<void> {
     );
     if (!global) {
       console.log("");
+      console.log("Edit .envshield.json to customize behavior.");
       console.log("To enable globally, run: envshield-mcp init --global");
     }
   }

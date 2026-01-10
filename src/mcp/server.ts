@@ -16,6 +16,55 @@ interface EnvshieldServer {
   secrets: SecretStore;
 }
 
+/**
+ * Simple in-memory rate limiter to prevent command flooding.
+ * Allows up to `maxRequests` commands within `windowMs` milliseconds.
+ */
+class RateLimiter {
+  private timestamps: number[] = [];
+  private readonly maxRequests: number;
+  private readonly windowMs: number;
+
+  constructor(maxRequests: number, windowMs: number) {
+    this.maxRequests = maxRequests;
+    this.windowMs = windowMs;
+  }
+
+  /**
+   * Check if a request should be allowed.
+   * @returns true if allowed, false if rate limited
+   */
+  check(): boolean {
+    const now = Date.now();
+
+    // Remove timestamps outside the current window
+    this.timestamps = this.timestamps.filter(t => now - t < this.windowMs);
+
+    if (this.timestamps.length >= this.maxRequests) {
+      return false;
+    }
+
+    this.timestamps.push(now);
+    return true;
+  }
+
+  /**
+   * Get time until next request is allowed (in milliseconds).
+   * @returns milliseconds to wait, or 0 if request can be made now
+   */
+  getWaitTime(): number {
+    const now = Date.now();
+    this.timestamps = this.timestamps.filter(t => now - t < this.windowMs);
+
+    if (this.timestamps.length < this.maxRequests) {
+      return 0;
+    }
+
+    const oldestTimestamp = this.timestamps[0];
+    return Math.max(0, this.windowMs - (now - oldestTimestamp));
+  }
+}
+
 export async function createEnvshieldServer(
   projectDir: string
 ): Promise<EnvshieldServer> {
@@ -23,6 +72,9 @@ export async function createEnvshieldServer(
   const secrets = await loadSecrets(projectDir, config.envFiles);
   const scrubber = new Scrubber(config.redactMode, config.redactPatterns);
   const executor = new CommandExecutor(scrubber, config.blockedCommands);
+
+  // Rate limiter: 30 commands per minute to prevent flooding
+  const rateLimiter = new RateLimiter(30, 60000);
 
   const tools: Tool[] = [
     {
@@ -99,6 +151,17 @@ export async function createEnvshieldServer(
       }
 
       case "run_with_secrets": {
+        // Check rate limit before executing command
+        if (!rateLimiter.check()) {
+          const waitTime = rateLimiter.getWaitTime();
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: `Rate limit exceeded. Too many commands requested. Please wait ${Math.ceil(waitTime / 1000)} seconds before trying again.`,
+            redactedCount: 0,
+          };
+        }
+
         const command = args.command as string;
         const secretNames = args.secrets as string[];
         const timeout = (args.timeout as number) ?? 30000;

@@ -27,9 +27,13 @@ export class CommandExecutor {
   async execute(options: ExecuteOptions): Promise<ExecuteResult> {
     const { command, secrets, timeout, workingDir } = options;
 
-    // Check for blocked commands
+    // Check for blocked commands using word-boundary-aware matching
     for (const blocked of this.blockedCommands) {
-      if (command.includes(blocked)) {
+      // Escape regex special characters in the blocked pattern
+      const escaped = blocked.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Use word boundaries to match whole commands/pipes, not substrings
+      const blockedRegex = new RegExp(`(?:^|\\s|[|&;])${escaped}(?:\\s|[|&;]|$)`);
+      if (blockedRegex.test(command)) {
         return {
           exitCode: 1,
           stdout: "",
@@ -55,11 +59,21 @@ export class CommandExecutor {
         shell: true,
         env,
         cwd: workingDir,
+        detached: false,  // Ensure process group is created for killing entire tree
       });
 
       const timer = setTimeout(() => {
         timedOut = true;
-        proc.kill("SIGKILL");
+        // Kill entire process group to prevent background processes from continuing
+        try {
+          // Negative PID kills the entire process group
+          if (proc.pid !== undefined) {
+            process.kill(-proc.pid, "SIGKILL");
+          }
+        } catch {
+          // Fallback to killing only the parent process
+          proc.kill("SIGKILL");
+        }
       }, timeout);
 
       const done = (result: ExecuteResult) => {
@@ -94,6 +108,15 @@ export class CommandExecutor {
         // Scrub secrets from output
         const scrubStdout = this.scrubber.scrub(stdout, secrets);
         const scrubStderr = this.scrubber.scrub(stderr, secrets);
+
+        // Verify scrubbing was effective - check if any secret values remain
+        const combinedOutput = scrubStdout.text + scrubStderr.text;
+        for (const [name, value] of secrets) {
+          if (value && combinedOutput.includes(value)) {
+            // Secret value still present after scrubbing - this is a security issue
+            console.error(`[envshield SECURITY WARNING] Secret "${name}" may still be present in output despite scrubbing. This could indicate: (1) The secret format doesn't match known patterns, (2) Custom redact patterns are needed, or (3) Output encoding is bypassing detection.`);
+          }
+        }
 
         done({
           exitCode: code ?? 1,

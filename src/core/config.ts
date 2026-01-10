@@ -30,8 +30,9 @@ export async function loadConfig(projectDir: string): Promise<EnvshieldConfig> {
     try {
       const globalConfig = JSON.parse(await readFile(globalPath, "utf-8"));
       config = { ...config, ...globalConfig };
-    } catch {
-      // Ignore parse errors, use defaults
+    } catch (err) {
+      // Log error for debugging, but use defaults
+      console.error(`[envshield] Failed to load global config from ${globalPath}:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -40,8 +41,9 @@ export async function loadConfig(projectDir: string): Promise<EnvshieldConfig> {
     try {
       const localConfig = JSON.parse(await readFile(localPath, "utf-8"));
       config = { ...config, ...localConfig };
-    } catch {
-      // Ignore parse errors
+    } catch (err) {
+      // Log error for debugging, but use defaults
+      console.error(`[envshield] Failed to load local config from ${localPath}:`, err instanceof Error ? err.message : err);
     }
   }
 
