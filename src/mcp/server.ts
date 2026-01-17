@@ -73,8 +73,10 @@ export async function createEnvshieldServer(
   const scrubber = new Scrubber(config.redactMode, config.redactPatterns);
   const executor = new CommandExecutor(scrubber, config.blockedCommands);
 
-  // Rate limiter: 30 commands per minute to prevent flooding
-  const rateLimiter = new RateLimiter(30, 60000);
+  // Rate limiter: only create if enabled in config
+  const rateLimiter = config.rateLimit.enabled
+    ? new RateLimiter(config.rateLimit.maxRequests, config.rateLimit.windowMs)
+    : null;
 
   const tools: Tool[] = [
     {
@@ -151,8 +153,8 @@ export async function createEnvshieldServer(
       }
 
       case "run_with_secrets": {
-        // Check rate limit before executing command
-        if (!rateLimiter.check()) {
+        // Check rate limit before executing command (if enabled)
+        if (rateLimiter && !rateLimiter.check()) {
           const waitTime = rateLimiter.getWaitTime();
           return {
             exitCode: 1,

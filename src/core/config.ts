@@ -3,12 +3,19 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
+export interface RateLimitConfig {
+  enabled: boolean;
+  maxRequests: number;
+  windowMs: number;
+}
+
 export interface EnvshieldConfig {
   envFiles: string[];
   redactMode: "placeholder" | "asterisk" | "partial";
   redactPatterns: string[];
   allowedCommands: string[] | null;
   blockedCommands: string[];
+  rateLimit: RateLimitConfig;
 }
 
 export const DEFAULT_CONFIG: EnvshieldConfig = {
@@ -17,6 +24,11 @@ export const DEFAULT_CONFIG: EnvshieldConfig = {
   redactPatterns: [],
   allowedCommands: null,
   blockedCommands: ["rm -rf", "sudo"],
+  rateLimit: {
+    enabled: false,
+    maxRequests: 30,
+    windowMs: 60000,
+  },
 };
 
 export async function loadConfig(projectDir: string): Promise<EnvshieldConfig> {
